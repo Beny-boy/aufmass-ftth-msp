@@ -33,4 +33,18 @@ class ObdParserTest {
         assertEquals("WP0ZZZ99ZTS392124", ObdParser.parseVin(raw))
     }
     @Test fun voltage() { assertEquals("12.6V", ObdParser.parseVoltage("12.6V\r")) }
+    @Test fun readiness() {
+        // A=0x82 (MIL an, 2 Fehler), B=0x07 (3 Tests unterstützt, fertig), C=0x65, D=0x04
+        val r = ObdParser.parseReadiness("41 01 82 07 65 04\r\r")!!
+        assertTrue(r.milOn); assertEquals(2, r.dtcCount)
+        assertEquals("bereit", r.monitors.first { it.first == "Komponenten" }.second)
+        assertEquals("bereit", r.monitors.first { it.first == "Katalysator" }.second)
+        assertEquals("nicht bereit", r.monitors.first { it.first == "Verdunstungssystem (EVAP)" }.second)
+        assertEquals("nicht unterstützt", r.monitors.first { it.first == "Sekundärluft" }.second)
+    }
+    @Test fun freezeFrame() {
+        val d = ObdParser.parseFreezeFrame("42 0C 00 0F A0\r", "0C")!!
+        assertEquals(1000.0, ObdParser.livePids.first { it.code == "0C" }.calc(d), 0.01)
+    }
+    @Test fun battery() { assertEquals("voll geladen", ObdParser.batteryRating(12.7)) }
 }

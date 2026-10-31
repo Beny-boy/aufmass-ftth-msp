@@ -38,8 +38,11 @@ class MainActivity : Activity() {
         val dtc = btn("Fehlerspeicher lesen") { run { readDtcs() } }
         val clear = btn("Fehlerspeicher löschen") { confirmClear() }
         val vin = btn("Fahrgestellnummer (VIN) lesen") { run { readVin() } }
+        val ready = btn("Emissions-/Bereitschaftstest") { run { readReadiness() } }
+        val ff = btn("Freeze-Frame (Fehlerzustand)") { run { readFreezeFrame() } }
+        val bat = btn("Batterieprüfung") { run { readBattery() } }
         liveBtn = btn("Live-Daten starten") { toggleLive() }
-        actionButtons += listOf(dtc, clear, vin, liveBtn)
+        actionButtons += listOf(dtc, clear, ready, ff, bat, vin, liveBtn)
         actionButtons.forEach { it.isEnabled = false }
         val scroll = ScrollView(this).apply { addView(log) }
         root.addView(status); root.addView(connect)
@@ -135,6 +138,37 @@ class MainActivity : Activity() {
         val r = elm.send("0902")
         val vin = ObdParser.parseVin(r)
         setLog(vin?.let { "VIN: $it" } ?: "VIN nicht lesbar (nicht jedes Fahrzeug unterstützt sie). Antwort: ${r.trim()}")
+    }
+
+    private fun readReadiness() {
+        val r = ObdParser.parseReadiness(elm.send("0101"))
+        if (r == null) { setLog("Keine Antwort auf den Monitorstatus."); return }
+        val sb = StringBuilder()
+        sb.append("Motorkontrollleuchte: ").append(if (r.milOn) "AN" else "aus").append('\n')
+        sb.append("Gespeicherte Fehler: ").append(r.dtcCount).append("\n\n")
+        r.monitors.forEach { sb.append(it.first.padEnd(28)).append(it.second).append('\n') }
+        setLog(sb.toString())
+    }
+
+    private fun readFreezeFrame() {
+        val sb = StringBuilder("Freeze-Frame (Zustand beim ersten Fehler):\n\n")
+        var any = false
+        for (pid in ObdParser.livePids) {
+            val d = ObdParser.parseFreezeFrame(elm.send("02" + pid.code + "00", 2000), pid.code)
+            if (d != null && d.size >= pid.minBytes) {
+                any = true
+                sb.append(pid.label.padEnd(22)).append("%.1f %s".format(pid.calc(d), pid.unit)).append('\n')
+            }
+        }
+        setLog(if (any) sb.toString() else "Keine Freeze-Frame-Daten gespeichert oder nicht unterstützt.")
+    }
+
+    private fun readBattery() {
+        val v = ObdParser.parseVoltage(elm.send("ATRV"))
+        val n = v?.dropLast(1)?.toDoubleOrNull()
+        setLog(if (n == null) "Spannung nicht lesbar." else
+            "Batteriespannung: $v\nBewertung (Richtwert bei Motor aus): ${ObdParser.batteryRating(n)}\n" +
+            "Bei laufendem Motor sind ca. 13,5–14,7 V normal (Richtwert).")
     }
 
     private fun toggleLive() {

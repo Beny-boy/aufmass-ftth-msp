@@ -92,4 +92,46 @@ object ObdParser {
     /** Spannung aus "ATRV"-Antwort, z. B. "12.6V". */
     fun parseVoltage(raw: String): String? =
         Regex("([0-9]+\\.?[0-9]*)V", RegexOption.IGNORE_CASE).find(raw)?.value
+
+    data class Readiness(val milOn: Boolean, val dtcCount: Int, val monitors: List<Pair<String, String>>)
+
+    /** Antwort auf 0101: Monitorstatus (Kontrollleuchte, Fehleranzahl, Bereitschaftstests). */
+    fun parseReadiness(raw: String): Readiness? {
+        val d = parseMode01(raw, "01") ?: return null
+        if (d.size < 4) return null
+        val (a, b, c, e) = listOf(d[0], d[1], d[2], d[3])
+        fun st(avail: Boolean, incomplete: Boolean) = if (!avail) "nicht unterstützt" else if (incomplete) "nicht bereit" else "bereit"
+        val m = mutableListOf<Pair<String, String>>()
+        m += "Aussetzererkennung" to st((b and 1) != 0, (b and 0x10) != 0)
+        m += "Kraftstoffsystem" to st((b and 2) != 0, (b and 0x20) != 0)
+        m += "Komponenten" to st((b and 4) != 0, (b and 0x40) != 0)
+        val names = if ((b and 8) == 0)
+            listOf("Katalysator", "Beheizter Katalysator", "Verdunstungssystem (EVAP)", "Sekundärluft",
+                "Klimaanlage (Kältemittel)", "Lambdasonde", "Lambdasonden-Heizung", "AGR")
+        else
+            listOf("NMHC-Katalysator", "NOx/SCR", "(reserviert)", "Ladedruck",
+                "(reserviert)", "Abgassensor", "Partikelfilter", "AGR/VVT")
+        for (i in 0..7) if (names[i] != "(reserviert)")
+            m += names[i] to st((c and (1 shl i)) != 0, (e and (1 shl i)) != 0)
+        return Readiness((a and 0x80) != 0, a and 0x7F, m)
+    }
+
+    /** Freeze-Frame (Modus 02): Antwort "42 <PID> <Frame> <Daten>". */
+    fun parseFreezeFrame(raw: String, pid: String): IntArray? {
+        val marker = "42" + pid.uppercase() + "00"
+        val joined = payloads(raw).joinToString("")
+        val i = joined.indexOf(marker)
+        if (i < 0) return null
+        val data = joined.substring(i + marker.length)
+        if (data.length < 2) return null
+        return data.chunked(2).filter { it.length == 2 }.map { it.toInt(16) }.toIntArray()
+    }
+
+    /** Einordnung der Ruhespannung (Richtwerte, Motor aus). */
+    fun batteryRating(volts: Double): String = when {
+        volts >= 12.6 -> "voll geladen"
+        volts >= 12.2 -> "gut (ca. 75 %)"
+        volts >= 12.0 -> "teilgeladen – laden empfohlen"
+        else -> "schwach/entladen – Batterie prüfen lassen"
+    }
 }
