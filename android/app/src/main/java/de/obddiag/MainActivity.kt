@@ -25,6 +25,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var log: TextView
     private lateinit var liveBtn: Button
+    private val db by lazy { DtcDatabase.load(this) }
     private val actionButtons = mutableListOf<Button>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -116,9 +117,10 @@ class MainActivity : Activity() {
         val p = ObdParser.parseDtcs(pending, "47")
         val sb = StringBuilder()
         sb.append("Gespeicherte Fehler: ").append(if (s.isEmpty()) "keine" else s.joinToString(", ")).append('\n')
-        sb.append("Anstehende Fehler: ").append(if (p.isEmpty()) "keine" else p.joinToString(", ")).append('\n')
-        sb.append("\nP = Antrieb, C = Fahrwerk, B = Karosserie, U = Netzwerk.\n")
-        sb.append("Hinweis: Dies sind die genormten OBD-II-Fehlercodes (Emissionssteuergeräte).")
+        sb.append("Anstehende Fehler: ").append(if (p.isEmpty()) "keine" else p.joinToString(", ")).append("\n\n")
+        for (c in (s + p).distinct()) sb.append(db.format(c)).append('\n')
+        sb.append("P = Antrieb, C = Fahrwerk, B = Karosserie, U = Netzwerk.\n")
+        sb.append("Fehlerbeschreibungen: OBDex (CC0), genormte OBD-II-Codes. Kosten sind grobe Richtwerte.")
         setLog(sb.toString())
     }
 
