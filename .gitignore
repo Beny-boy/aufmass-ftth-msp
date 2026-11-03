@@ -1,0 +1,10 @@
+# Persönliche Claude-Konfiguration nicht versionieren
+CLAUDE.local.md
+.claude/settings.local.json
+
+# Zugangsdaten: mit bestehenden Projekt-Regeln zusammenführen
+.env
+.env.*
+!.env.example
+*.pem
+*.key
