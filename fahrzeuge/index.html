@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fahrzeug-Verwaltung</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="theme-color" content="#1a73e8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fahrzeuge">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--tx:#1b1f2a;--mut:#6b7280;--pri:#1a73e8;--red:#d93025;--org:#e37400;--grn:#188038;--bd:#e3e7ee}
+@media (prefers-color-scheme:dark){:root{--bg:#10131a;--card:#1a1f2b;--tx:#e8eaf0;--mut:#9aa3b2;--bd:#2a3140;--pri:#6ea8ff;--red:#ff6b61;--org:#ffb04d;--grn:#5ad07f}}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--tx);padding-bottom:env(safe-area-inset-bottom)}
+header{position:sticky;top:0;z-index:5;background:var(--pri);color:#fff;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;display:flex;align-items:center;gap:10px}
+header h1{font-size:18px;margin:0;flex:1}
+header button{background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;padding:8px 12px;font-size:15px;cursor:pointer}
+main{max-width:900px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-bottom:12px}
+.card.click{cursor:pointer}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sp{flex:1}
+.mut{color:var(--mut);font-size:14px}
+.plate{display:inline-block;border:2px solid var(--tx);border-radius:6px;padding:1px 8px;font-weight:700;letter-spacing:1px;font-size:14px}
+.badge{display:inline-block;border-radius:99px;padding:2px 10px;font-size:13px;font-weight:600;color:#fff}
+.b-red{background:var(--red)}.b-org{background:var(--org)}.b-grn{background:var(--grn)}.b-gry{background:#8a93a3}
+button.btn{background:var(--pri);color:#fff;border:0;border-radius:10px;padding:10px 14px;font-size:15px;cursor:pointer}
+button.btn.sec{background:transparent;color:var(--pri);border:1px solid var(--pri)}
+button.btn.del{background:transparent;color:var(--red);border:1px solid var(--red)}
+button.btn.sm{padding:6px 10px;font-size:14px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 3px}
+input,select,textarea{width:100%;padding:10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font-size:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+@media (max-width:520px){.grid{grid-template-columns:1fr}}
+h2{font-size:17px;margin:18px 0 8px}
+.item{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--bd)}
+.item:first-child{border-top:0}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+@media (min-width:700px){.overlay{align-items:center}}
+.sheet{background:var(--card);width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+@media (min-width:700px){.sheet{border-radius:18px}}
+.alert{border-left:5px solid var(--red)}
+.alert.soon{border-left-color:var(--org)}
+.empty{text-align:center;color:var(--mut);padding:40px 10px}
+.note{font-size:13px;color:var(--mut);background:var(--card);border:1px dashed var(--bd);border-radius:10px;padding:10px;margin-top:14px}
+</style>
+</head>
+<body>
+<header>
+  <button id="back" style="display:none">‹ Zurück</button>
+  <h1 id="title">Meine Fahrzeuge</h1>
+  <button id="menuBtn">⋯</button>
+</header>
+<main id="app"></main>
+<div id="modal"></div>
+
+<script>
+"use strict";
+const MAX_VEHICLES = 10;
+const KEY = "fahrzeuge.v1";
+const DEFAULT_INTERVALS = [
+  {type:"Ölwechsel", km:15000, months:12},
+  {type:"Inspektion", km:30000, months:24},
+  {type:"Reifenwechsel", km:0, months:6},
+  {type:"Bremsen", km:40000, months:0}
+];
+const SERVICE_TYPES = ["Ölwechsel","Inspektion","Reifenwechsel","Bremsen","Batterie","Zahnriemen","Sonstiges"];
+
+let state = load();
+let view = {name:"list", id:null};
+
+/* ---------- Speicher ---------- */
+function load(){
+  try{
+    const s = JSON.parse(localStorage.getItem(KEY));
+    if(s && Array.isArray(s.vehicles)) return Object.assign({settings:{warnKm:1000,warnDays:30}}, s);
+  }catch(e){}
+  return {vehicles:[], settings:{warnKm:1000, warnDays:30}};
+}
+function save(){
+  try{ localStorage.setItem(KEY, JSON.stringify(state)); }
+  catch(e){ alert("Speichern fehlgeschlagen (Speicher voll oder blockiert). Bitte Backup exportieren."); }
+}
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* ---------- Datum / Berechnung ---------- */
+const today = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
+const parseD = s => { if(!s) return null; const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d); };
+const fmtD = d => d ? d.toLocaleDateString("de-DE") : "–";
+const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+function addMonths(d, n){ const r = new Date(d); const day = r.getDate(); r.setMonth(r.getMonth()+n); if(r.getDate()!==day) r.setDate(0); return r; }
+const daysTo = d => Math.round((d - today())/86400000);
+const fmtKm = n => (n==null||n==="") ? "–" : Number(n).toLocaleString("de-DE") + " km";
+
+/* Liefert alle Fälligkeiten eines Fahrzeugs mit Status */
+function dueItems(v){
+  const w = state.settings, out = [];
+  const rank = {red:3, org:2, grn:1, gry:0};
+  for(const it of (v.intervals||[])){
+    const list = (v.services||[]).filter(s => s.type===it.type).sort((a,b) => (a.date<b.date?1:a.date>b.date?-1:(b.km||0)-(a.km||0)));
+    const last = list[0];
+    if(!last){ out.push({label:it.type, st:"gry", text:"Noch kein Eintrag", key:v.id+it.type}); continue; }
+    let st = "grn", parts = [], nextDate = null, nextKm = null;
+    if(it.km>0 && last.km!=null && last.km!==""){
+      nextKm = Number(last.km) + Number(it.km);
+      const left = nextKm - Number(v.km||0);
+      parts.push(left<=0 ? `${fmtKm(-left)} überfällig` : `in ${fmtKm(left)} (bei ${fmtKm(nextKm)})`);
+      if(left<=0) st="red"; else if(left<=w.warnKm && rank[st]<2) st="org";
+    }
+    if(it.months>0){
+      nextDate = addMonths(parseD(last.date), Number(it.months));
+      const dl = daysTo(nextDate);
+      parts.push(dl<0 ? `${-dl} Tage überfällig` : dl===0 ? "heute fällig" : `in ${dl} Tagen (${fmtD(nextDate)})`);
+      if(dl<=0) st="red"; else if(dl<=w.warnDays && rank[st]<2) st="org";
+    }
+    out.push({label:it.type, st, text:`Zuletzt ${fmtD(parseD(last.date))}${last.km?` bei ${fmtKm(last.km)}`:""} · Nächste: ${parts.join(" / ")||"–"}`, nextDate, nextKm, key:v.id+it.type});
+  }
+  for(const [label,field] of [["HU/TÜV","huDate"],["Versicherung endet","insuranceEnd"]]){
+    if(!v[field]) continue;
+    const d = parseD(v[field]), dl = daysTo(d);
+    const st = dl<=0 ? "red" : dl<=w.warnDays ? "org" : "grn";
+    out.push({label, st, text: dl<0 ? `${-dl} Tage überfällig (${fmtD(d)})` : dl===0 ? "heute" : `in ${dl} Tagen (${fmtD(d)})`, nextDate:d, key:v.id+field});
+  }
+  return out;
+}
+const worst = items => items.reduce((a,i) => ({red:3,org:2,grn:1,gry:0}[i.st] > ({red:3,org:2,grn:1,gry:0}[a]) ? i.st : a), "gry");
+const stName = {red:"Überfällig", org:"Bald fällig", grn:"OK", gry:"Offen"};
+
+/* ---------- Rendering ---------- */
+function render(){
+  const app = document.getElementById("app");
+  const back = document.getElementById("back"), title = document.getElementById("title");
+  if(view.name==="list"){
+    back.style.display="none"; title.textContent="Meine Fahrzeuge";
+    app.innerHTML = renderList();
+  } else {
+    const v = state.vehicles.find(x => x.id===view.id);
+    if(!v){ view={name:"list"}; return render(); }
+    back.style.display=""; title.textContent=v.name;
+    app.innerHTML = renderDetail(v);
+  }
+  window.scrollTo(0,0);
+}
+
+function renderList(){
+  const vs = state.vehicles;
+  let alerts = [];
+  for(const v of vs) for(const i of dueItems(v)) if(i.st==="red"||i.st==="org") alerts.push({v,i});
+  alerts.sort((a,b) => (a.i.st==="red"?0:1)-(b.i.st==="red"?0:1));
+  let h = "";
+  if(alerts.length){
+    h += `<h2>Achtung (${alerts.length})</h2>`;
+    h += alerts.map(({v,i}) => `<div class="card alert ${i.st==="org"?"soon":""} click" onclick="openVehicle('${v.id}')">
+      <div class="row"><b>${esc(v.name)}</b> <span class="plate">${esc(v.plate)}</span><span class="sp"></span><span class="badge b-${i.st}">${stName[i.st]}</span></div>
+      <div><b>${esc(i.label)}</b> – <span class="mut">${esc(i.text)}</span></div></div>`).join("");
+  }
+  h += `<div class="row"><h2 class="sp">Fahrzeuge (${vs.length}/${MAX_VEHICLES})</h2>
+    <button class="btn" onclick="editVehicle()" ${vs.length>=MAX_VEHICLES?"disabled":""}>+ Fahrzeug</button></div>`;
+  if(!vs.length) h += `<div class="empty">Noch kein Fahrzeug erfasst.<br>Tippe auf „+ Fahrzeug“.</div>`;
+  h += vs.map(v => {
+    const items = dueItems(v), st = worst(items);
+    return `<div class="card click" onclick="openVehicle('${v.id}')">
+      <div class="row"><b>${esc(v.name)}</b><span class="plate">${esc(v.plate)}</span><span class="sp"></span><span class="badge b-${st}">${stName[st]}</span></div>
+      <div class="mut">${esc([v.make,v.model,v.year].filter(Boolean).join(" "))}</div>
+      <div class="mut">km-Stand: <b>${fmtKm(v.km)}</b> · Versicherung: ${esc(v.insurer||"–")}</div></div>`;
+  }).join("");
+  h += `<div class="note"><b>Hinweis zu Benachrichtigungen:</b> Die App prüft beim Öffnen alle Fälligkeiten und zeigt sie oben an (auf dem Desktop auch als Systemmitteilung, wenn erlaubt).
+  Für Erinnerungen, die <i>auch bei geschlossener App</i> auf dem iPhone klingeln, nutze im Fahrzeug „Kalender-Erinnerungen (.ics)“ – diese legen echte Kalender-Alarme an. kilometerbasierte Fälligkeiten sind darin nicht enthalten, weil der Kalender deinen km-Stand nicht kennt.</div>`;
+  return h;
+}
+
+function renderDetail(v){
+  const items = dueItems(v);
+  const sv = (v.services||[]).slice().sort((a,b) => a.date<b.date?1:-1);
+  return `
+  <div class="card">
+    <div class="row"><span class="plate">${esc(v.plate)}</span><span class="sp"></span>
+      <button class="btn sm sec" onclick="editVehicle('${v.id}')">Bearbeiten</button></div>
+    <div class="grid" style="margin-top:8px">
+      <div><div class="mut">Fahrzeug</div>${esc([v.make,v.model,v.year].filter(Boolean).join(" ")||"–")}</div>
+      <div><div class="mut">Fahrgestellnummer (FIN)</div><span style="word-break:break-all">${esc(v.vin||"–")}</span></div>
+      <div><div class="mut">Versicherung</div>${esc(v.insurer||"–")}${v.policy?` · Nr. ${esc(v.policy)}`:""}</div>
+      <div><div class="mut">Versicherung bis</div>${v.insuranceEnd?fmtD(parseD(v.insuranceEnd)):"–"}${v.insuranceCost?` · ${esc(v.insuranceCost)} €/Jahr`:""}</div>
+      <div><div class="mut">HU/TÜV bis</div>${v.huDate?fmtD(parseD(v.huDate)):"–"}</div>
+      <div><div class="mut">Aktueller km-Stand</div><b>${fmtKm(v.km)}</b>${v.kmDate?` <span class="mut">(${fmtD(parseD(v.kmDate))})</span>`:""}</div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn sm" onclick="updateKm('${v.id}')">km-Stand aktualisieren</button>
+      <button class="btn sm sec" onclick="exportIcs('${v.id}')">Kalender-Erinnerungen (.ics)</button>
+    </div>
+  </div>
+
+  <div class="row"><h2 class="sp">Fälligkeiten</h2><button class="btn sm sec" onclick="editIntervals('${v.id}')">Intervalle</button></div>
+  <div class="card">${items.length ? items.map(i => `<div class="item"><span class="badge b-${i.st}">${stName[i.st]}</span><div><b>${esc(i.label)}</b><div class="mut">${esc(i.text)}</div></div></div>`).join("") : `<div class="mut">Keine Intervalle definiert.</div>`}</div>
+
+  <div class="row"><h2 class="sp">Service-Historie (${sv.length})</h2><button class="btn sm" onclick="editService('${v.id}')">+ Eintrag</button></div>
+  <div class="card">${sv.length ? sv.map(s => `<div class="item"><div class="sp"><b>${esc(s.type)}</b> · ${fmtD(parseD(s.date))}${s.km?` · ${fmtKm(s.km)}`:""}${s.cost?` · ${esc(s.cost)} €`:""}
+      ${s.notes?`<div class="mut">${esc(s.notes)}</div>`:""}</div>
+      <button class="btn sm sec" onclick="editService('${v.id}','${s.id}')">✎</button></div>`).join("") : `<div class="mut">Noch keine Einträge.</div>`}</div>
+
+  <button class="btn del sm" onclick="deleteVehicle('${v.id}')">Fahrzeug löschen</button>`;
+}
+
+/* ---------- Navigation ---------- */
+function openVehicle(id){ view={name:"detail", id}; render(); }
+document.getElementById("back").onclick = () => { view={name:"list"}; render(); };
+
+/* ---------- Dialoge ---------- */
+function modal(html){
+  const m = document.getElementById("modal");
+  m.innerHTML = `<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="sheet">${html}</div></div>`;
+}
+function closeModal(){ document.getElementById("modal").innerHTML=""; }
+const val = id => document.getElementById(id).value.trim();
+
+function editVehicle(id){
+  const v = id ? state.vehicles.find(x => x.id===id) : {};
+  if(!id && state.vehicles.length>=MAX_VEHICLES) return alert("Maximal "+MAX_VEHICLES+" Fahrzeuge.");
+  modal(`<h2 style="margin-top:0">${id?"Fahrzeug bearbeiten":"Neues Fahrzeug"}</h2>
+  <label>Bezeichnung *</label><input id="f_name" value="${esc(v.name)}" placeholder="z. B. Firmenwagen Golf">
+  <div class="grid">
+    <div><label>Kennzeichen *</label><input id="f_plate" value="${esc(v.plate)}" autocapitalize="characters"></div>
+    <div><label>Fahrgestellnummer (17 Zeichen)</label><input id="f_vin" value="${esc(v.vin)}" maxlength="17" autocapitalize="characters"></div>
+    <div><label>Marke</label><input id="f_make" value="${esc(v.make)}"></div>
+    <div><label>Modell</label><input id="f_model" value="${esc(v.model)}"></div>
+    <div><label>Baujahr</label><input id="f_year" type="number" value="${esc(v.year)}"></div>
+    <div><label>Aktueller km-Stand</label><input id="f_km" type="number" inputmode="numeric" value="${esc(v.km)}"></div>
+    <div><label>Versicherung (Gesellschaft)</label><input id="f_insurer" value="${esc(v.insurer)}"></div>
+    <div><label>Policen-Nr.</label><input id="f_policy" value="${esc(v.policy)}"></div>
+    <div><label>Versicherung endet am</label><input id="f_ins_end" type="date" value="${esc(v.insuranceEnd)}"></div>
+    <div><label>Beitrag €/Jahr</label><input id="f_ins_cost" type="number" step="0.01" value="${esc(v.insuranceCost)}"></div>
+    <div><label>HU/TÜV gültig bis</label><input id="f_hu" type="date" value="${esc(v.huDate)}"></div>
+  </div>
+  <div class="row" style="margin-top:16px"><button class="btn" onclick="saveVehicle('${id||""}')">Speichern</button><button class="btn sec" onclick="closeModal()">Abbrechen</button></div>`);
+}
+function saveVehicle(id){
+  const name = val("f_name"), plate = val("f_plate").toUpperCase(), vin = val("f_vin").toUpperCase();
+  if(!name || !plate) return alert("Bezeichnung und Kennzeichen sind Pflicht.");
+  if(vin && !/^[A-HJ-NPR-Z0-9]{17}$/.test(vin) && !confirm("Die FIN sollte 17 Zeichen haben (ohne I, O, Q). Trotzdem speichern?")) return;
+  const km = val("f_km");
+  const data = {name, plate, vin, make:val("f_make"), model:val("f_model"), year:val("f_year"), insurer:val("f_insurer"), policy:val("f_policy"),
+    insuranceEnd:val("f_ins_end"), insuranceCost:val("f_ins_cost"), huDate:val("f_hu")};
+  let v;
+  if(id){ v = state.vehicles.find(x => x.id===id); const old = v.km; Object.assign(v, data); if(String(old)!==km){ v.km = km===""?"":Number(km); v.kmDate = iso(today()); } }
+  else { v = Object.assign({id:uid(), km: km===""?"":Number(km), kmDate: iso(today()), intervals: DEFAULT_INTERVALS.map(x => ({...x})), services:[]}, data); state.vehicles.push(v); }
+  save(); closeModal(); if(!id) view={name:"detail", id:v.id}; render();
+}
+function deleteVehicle(id){
+  const v = state.vehicles.find(x => x.id===id);
+  if(!confirm(`„${v.name}“ mit allen Service-Einträgen endgültig löschen?`)) return;
+  state.vehicles = state.vehicles.filter(x => x.id!==id); save(); view={name:"list"}; render();
+}
+function updateKm(id){
+  const v = state.vehicles.find(x => x.id===id);
+  modal(`<h2 style="margin-top:0">km-Stand aktualisieren</h2><label>Neuer km-Stand</label><input id="f_km" type="number" inputmode="numeric" value="${esc(v.km)}">
+  <div class="row" style="margin-top:16px"><button class="btn" onclick="saveKm('${id}')">Speichern</button><button class="btn sec" onclick="closeModal()">Abbrechen</button></div>`);
+}
+function saveKm(id){
+  const v = state.vehicles.find(x => x.id===id), n = val("f_km");
+  if(n==="" || Number(n)<0) return alert("Bitte gültigen km-Stand eingeben.");
+  if(v.km!=="" && Number(n) < Number(v.km) && !confirm("Der neue Stand ist niedriger als der bisherige. Trotzdem übernehmen?")) return;
+  v.km = Number(n); v.kmDate = iso(today()); save(); closeModal(); render(); notifyDue();
+}
+function editService(vid, sid){
+  const v = state.vehicles.find(x => x.id===vid);
+  const s = sid ? v.services.find(x => x.id===sid) : {date:iso(today()), km:v.km, type:"Ölwechsel"};
+  const types = [...new Set([...SERVICE_TYPES, ...v.intervals.map(i => i.type), s.type].filter(Boolean))];
+  modal(`<h2 style="margin-top:0">${sid?"Eintrag bearbeiten":"Service-Eintrag"}</h2>
+  <label>Art</label><select id="s_type">${types.map(t => `<option ${t===s.type?"selected":""}>${esc(t)}</option>`).join("")}</select>
+  <div class="grid"><div><label>Datum</label><input id="s_date" type="date" value="${esc(s.date)}"></div>
+  <div><label>km-Stand dabei</label><input id="s_km" type="number" inputmode="numeric" value="${esc(s.km)}"></div>
+  <div><label>Kosten €</label><input id="s_cost" type="number" step="0.01" value="${esc(s.cost)}"></div></div>
+  <label>Notizen (Werkstatt, Ölsorte, …)</label><textarea id="s_notes" rows="3">${esc(s.notes)}</textarea>
+  <div class="row" style="margin-top:16px"><button class="btn" onclick="saveService('${vid}','${sid||""}')">Speichern</button>
+  ${sid?`<button class="btn del" onclick="deleteService('${vid}','${sid}')">Löschen</button>`:""}<button class="btn sec" onclick="closeModal()">Abbrechen</button></div>`);
+}
+function saveService(vid, sid){
+  const v = state.vehicles.find(x => x.id===vid);
+  const date = val("s_date"); if(!date) return alert("Bitte Datum eingeben.");
+  const km = val("s_km");
+  const data = {type:val("s_type"), date, km: km===""?"":Number(km), cost:val("s_cost"), notes:val("s_notes")};
+  if(sid) Object.assign(v.services.find(x => x.id===sid), data); else v.services.push(Object.assign({id:uid()}, data));
+  if(data.km!=="" && (v.km==="" || data.km > Number(v.km))){ v.km = data.km; v.kmDate = date; }
+  save(); closeModal(); render();
+}
+function deleteService(vid, sid){
+  if(!confirm("Eintrag löschen?")) return;
+  const v = state.vehicles.find(x => x.id===vid); v.services = v.services.filter(x => x.id!==sid); save(); closeModal(); render();
+}
+function editIntervals(id){
+  const v = state.vehicles.find(x => x.id===id);
+  const rows = v.intervals.map((i,n) => `<div class="item" data-n="${n}"><input class="i_type" value="${esc(i.type)}" style="flex:2"><input class="i_km" type="number" placeholder="km" value="${i.km||""}" style="flex:1"><input class="i_mo" type="number" placeholder="Monate" value="${i.months||""}" style="flex:1"></div>`).join("");
+  modal(`<h2 style="margin-top:0">Wartungs-Intervalle</h2><div class="mut">Art · alle … km · alle … Monate (leer = nicht berücksichtigen). Die Fälligkeit wird ab dem letzten passenden Service-Eintrag berechnet.</div>
+  <div id="ivs">${rows}</div><button class="btn sm sec" style="margin-top:8px" onclick="addIntervalRow()">+ Intervall</button>
+  <label>Warnung ab … km vor Fälligkeit</label><input id="w_km" type="number" value="${state.settings.warnKm}">
+  <label>Warnung ab … Tage vor Fälligkeit</label><input id="w_days" type="number" value="${state.settings.warnDays}">
+  <div class="row" style="margin-top:16px"><button class="btn" onclick="saveIntervals('${id}')">Speichern</button><button class="btn sec" onclick="closeModal()">Abbrechen</button></div>`);
+}
+function addIntervalRow(){
+  const d = document.createElement("div"); d.className="item";
+  d.innerHTML = `<input class="i_type" placeholder="Art" style="flex:2"><input class="i_km" type="number" placeholder="km" style="flex:1"><input class="i_mo" type="number" placeholder="Monate" style="flex:1">`;
+  document.getElementById("ivs").appendChild(d);
+}
+function saveIntervals(id){
+  const v = state.vehicles.find(x => x.id===id);
+  v.intervals = [...document.querySelectorAll("#ivs .item")].map(r => ({
+    type:r.querySelector(".i_type").value.trim(), km:Number(r.querySelector(".i_km").value)||0, months:Number(r.querySelector(".i_mo").value)||0
+  })).filter(i => i.type && (i.km||i.months));
+  state.settings.warnKm = Math.max(0, Number(val("w_km"))||0);
+  state.settings.warnDays = Math.max(0, Number(val("w_days"))||0);
+  save(); closeModal(); render();
+}
+
+/* ---------- Kalender-Erinnerungen (.ics) ---------- */
+function exportIcs(id){
+  const v = state.vehicles.find(x => x.id===id);
+  const ev = dueItems(v).filter(i => i.nextDate);
+  if(!ev.length) return alert("Keine datumsbasierten Fälligkeiten vorhanden.");
+  const ics = d => iso(d).replace(/-/g,"");
+  const esci = s => String(s).replace(/([,;\\])/g,"\\$1").replace(/\n/g,"\\n");
+  const stamp = new Date().toISOString().replace(/[-:]/g,"").replace(/\.\d+/,"");
+  let out = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Fahrzeug-Verwaltung//DE","CALSCALE:GREGORIAN"];
+  for(const i of ev){
+    const d = i.nextDate, next = new Date(d); next.setDate(next.getDate()+1);
+    out.push("BEGIN:VEVENT",`UID:${i.key}-${ics(d)}@fahrzeuge`,`DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${ics(d)}`,`DTEND;VALUE=DATE:${ics(next)}`,
+      `SUMMARY:${esci(`${i.label}: ${v.name} (${v.plate})`)}`,
+      "BEGIN:VALARM","ACTION:DISPLAY",`DESCRIPTION:${esci(`${i.label} – ${v.plate}`)}`,"TRIGGER:-P14D","END:VALARM",
+      "BEGIN:VALARM","ACTION:DISPLAY",`DESCRIPTION:${esci(`${i.label} – ${v.plate}`)}`,"TRIGGER:-P1D","END:VALARM",
+      "END:VEVENT");
+  }
+  out.push("END:VCALENDAR");
+  download(`${v.plate.replace(/\W+/g,"_")}-erinnerungen.ics`, out.join("\r\n"), "text/calendar");
+}
+function download(name, text, type){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], {type:type+";charset=utf-8"}));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+/* ---------- Menü: Backup, Benachrichtigungen ---------- */
+document.getElementById("menuBtn").onclick = () => modal(`<h2 style="margin-top:0">Menü</h2>
+  <div class="row" style="flex-direction:column;align-items:stretch;gap:10px">
+  <button class="btn" onclick="askNotif()">Benachrichtigungen erlauben</button>
+  <button class="btn sec" onclick="exportBackup()">Backup exportieren (JSON)</button>
+  <label class="btn sec" style="text-align:center;margin:0;cursor:pointer">Backup importieren<input type="file" accept="application/json" style="display:none" onchange="importBackup(event)"></label>
+  <button class="btn sec" onclick="closeModal()">Schließen</button></div>
+  <div class="note">Alle Daten liegen nur lokal in diesem Browser/Gerät (kein Server, keine Synchronisierung zwischen iPhone und Desktop). Zum Übertragen: Backup exportieren und auf dem anderen Gerät importieren. Mache regelmäßig ein Backup – beim Löschen der Browserdaten gehen die Daten verloren.</div>`);
+
+function exportBackup(){ download(`fahrzeuge-backup-${iso(today())}.json`, JSON.stringify(state,null,2), "application/json"); }
+function importBackup(e){
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try{
+      const s = JSON.parse(r.result);
+      if(!s || !Array.isArray(s.vehicles)) throw 0;
+      if(!confirm(`Backup mit ${s.vehicles.length} Fahrzeug(en) importieren? Die aktuellen Daten werden ersetzt.`)) return;
+      state = Object.assign({settings:{warnKm:1000,warnDays:30}}, s); state.vehicles = state.vehicles.slice(0, MAX_VEHICLES);
+      save(); closeModal(); view={name:"list"}; render();
+    }catch(_){ alert("Ungültige Backup-Datei."); }
+  };
+  r.readAsText(f);
+}
+
+/* ---------- Benachrichtigungen (beim Öffnen) ---------- */
+async function askNotif(){
+  if(!("Notification" in window)) return alert("Dieser Browser unterstützt keine Benachrichtigungen. Auf dem iPhone: Seite über „Teilen → Zum Home-Bildschirm“ installieren (iOS 16.4+) und von dort öffnen.");
+  const p = await Notification.requestPermission();
+  alert(p==="granted" ? "Erlaubt. Fällige Punkte werden beim Öffnen der App gemeldet." : "Nicht erlaubt.");
+  closeModal(); notifyDue();
+}
+async function notifyDue(){
+  try{
+    if(!("Notification" in window) || Notification.permission!=="granted") return;
+    const sent = JSON.parse(localStorage.getItem("fahrzeuge.notified")||"{}"), t = iso(today());
+    const reg = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    for(const v of state.vehicles) for(const i of dueItems(v)){
+      if(i.st!=="red" && i.st!=="org") continue;
+      const k = i.key+i.st; if(sent[k]===t) continue;
+      const title = `${i.st==="red"?"Überfällig":"Bald fällig"}: ${i.label} – ${v.plate}`;
+      if(reg) await reg.showNotification(title, {body:i.text, icon:"icon-192.png", tag:k}); else new Notification(title, {body:i.text, icon:"icon-192.png"});
+      sent[k] = t;
+    }
+    localStorage.setItem("fahrzeuge.notified", JSON.stringify(sent));
+  }catch(e){}
+}
+
+/* ---------- Start ---------- */
+render();
+if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").then(notifyDue).catch(()=>{});
+document.addEventListener("visibilitychange", () => { if(!document.hidden){ render(); notifyDue(); } });
+try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){}
+</script>
+</body>
+</html>
