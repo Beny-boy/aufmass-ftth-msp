@@ -62,12 +62,20 @@ h2{font-size:17px;margin:18px 0 8px}
 "use strict";
 const MAX_VEHICLES = 10;
 const KEY = "fahrzeuge.v1";
-const DEFAULT_INTERVALS = [
-  {type:"Ölwechsel", km:15000, months:12},
-  {type:"Inspektion", km:30000, months:24},
-  {type:"Reifenwechsel", km:0, months:6},
-  {type:"Bremsen", km:40000, months:0}
-];
+const DEFAULT_INTERVALS = {
+  "PKW": [
+    {type:"Ölwechsel", km:25000, months:0},
+    {type:"Inspektion", km:30000, months:24},
+    {type:"Reifenwechsel", km:0, months:6},
+    {type:"Bremsen", km:40000, months:0}
+  ],
+  "Motorrad": [
+    {type:"Ölwechsel", km:5000, months:0},
+    {type:"Inspektion", km:10000, months:12},
+    {type:"Reifenwechsel", km:0, months:0},
+    {type:"Bremsen", km:20000, months:0}
+  ]
+};
 const SERVICE_TYPES = ["Ölwechsel","Inspektion","Reifenwechsel","Bremsen","Batterie","Zahnriemen","Sonstiges"];
 
 let state = load();
@@ -179,7 +187,7 @@ function renderDetail(v){
   const sv = (v.services||[]).slice().sort((a,b) => a.date<b.date?1:-1);
   return `
   <div class="card">
-    <div class="row"><span class="plate">${esc(v.plate)}</span><span class="sp"></span>
+    <div class="row"><span class="plate">${esc(v.plate)}</span><span class="mut">${esc(v.kind||"PKW")}</span><span class="sp"></span>
       <button class="btn sm sec" onclick="editVehicle('${v.id}')">Bearbeiten</button></div>
     <div class="grid" style="margin-top:8px">
       <div><div class="mut">Fahrzeug</div>${esc([v.make,v.model,v.year].filter(Boolean).join(" ")||"–")}</div>
@@ -223,6 +231,7 @@ function editVehicle(id){
   if(!id && state.vehicles.length>=MAX_VEHICLES) return alert("Maximal "+MAX_VEHICLES+" Fahrzeuge.");
   modal(`<h2 style="margin-top:0">${id?"Fahrzeug bearbeiten":"Neues Fahrzeug"}</h2>
   <label>Bezeichnung *</label><input id="f_name" value="${esc(v.name)}" placeholder="z. B. Firmenwagen Golf">
+  <label>Fahrzeugart</label><select id="f_kind">${["PKW","Motorrad"].map(k => `<option ${(v.kind||"PKW")===k?"selected":""}>${k}</option>`).join("")}</select>
   <div class="grid">
     <div><label>Kennzeichen *</label><input id="f_plate" value="${esc(v.plate)}" autocapitalize="characters"></div>
     <div><label>Fahrgestellnummer (17 Zeichen)</label><input id="f_vin" value="${esc(v.vin)}" maxlength="17" autocapitalize="characters"></div>
@@ -243,11 +252,11 @@ function saveVehicle(id){
   if(!name || !plate) return alert("Bezeichnung und Kennzeichen sind Pflicht.");
   if(vin && !/^[A-HJ-NPR-Z0-9]{17}$/.test(vin) && !confirm("Die FIN sollte 17 Zeichen haben (ohne I, O, Q). Trotzdem speichern?")) return;
   const km = val("f_km");
-  const data = {name, plate, vin, make:val("f_make"), model:val("f_model"), year:val("f_year"), insurer:val("f_insurer"), policy:val("f_policy"),
+  const data = {kind:val("f_kind"), name, plate, vin, make:val("f_make"), model:val("f_model"), year:val("f_year"), insurer:val("f_insurer"), policy:val("f_policy"),
     insuranceEnd:val("f_ins_end"), insuranceCost:val("f_ins_cost"), huDate:val("f_hu")};
   let v;
   if(id){ v = state.vehicles.find(x => x.id===id); const old = v.km; Object.assign(v, data); if(String(old)!==km){ v.km = km===""?"":Number(km); v.kmDate = iso(today()); } }
-  else { v = Object.assign({id:uid(), km: km===""?"":Number(km), kmDate: iso(today()), intervals: DEFAULT_INTERVALS.map(x => ({...x})), services:[]}, data); state.vehicles.push(v); }
+  else { v = Object.assign({id:uid(), km: km===""?"":Number(km), kmDate: iso(today()), intervals: DEFAULT_INTERVALS[data.kind].map(x => ({...x})), services:[]}, data); state.vehicles.push(v); }
   save(); closeModal(); if(!id) view={name:"detail", id:v.id}; render();
 }
 function deleteVehicle(id){
