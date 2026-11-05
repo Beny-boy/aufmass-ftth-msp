@@ -128,10 +128,11 @@ function dueItems(v){
     }
     out.push({label:it.type, st, text:`Zuletzt ${fmtD(parseD(last.date))}${last.km?` bei ${fmtKm(last.km)}`:""} · Nächste: ${parts.join(" / ")||"–"}`, nextDate, nextKm, key:v.id+it.type});
   }
-  for(const [label,field] of [["HU/TÜV","huDate"],["Versicherung endet","insuranceEnd"]]){
+  for(const [label,field] of [["TÜV/HU","huDate"],["Versicherung endet","insuranceEnd"]]){
     if(!v[field]) continue;
     const d = parseD(v[field]), dl = daysTo(d);
-    const st = dl<=0 ? "red" : dl<=w.warnDays ? "org" : "grn";
+    const lead = field==="huDate" ? (w.warnHu ?? 60) : w.warnDays;
+    const st = dl<=0 ? "red" : dl<=lead ? "org" : "grn";
     out.push({label, st, text: dl<0 ? `${-dl} Tage überfällig (${fmtD(d)})` : dl===0 ? "heute" : `in ${dl} Tagen (${fmtD(d)})`, nextDate:d, key:v.id+field});
   }
   return out;
@@ -308,6 +309,7 @@ function editIntervals(id){
   <div id="ivs">${rows}</div><button class="btn sm sec" style="margin-top:8px" onclick="addIntervalRow()">+ Intervall</button>
   <label>Warnung ab … km vor Fälligkeit</label><input id="w_km" type="number" value="${state.settings.warnKm}">
   <label>Warnung ab … Tage vor Fälligkeit</label><input id="w_days" type="number" value="${state.settings.warnDays}">
+  <label>TÜV/HU: Warnung ab … Tage vorher</label><input id="w_hu" type="number" value="${state.settings.warnHu ?? 60}">
   <div class="row" style="margin-top:16px"><button class="btn" onclick="saveIntervals('${id}')">Speichern</button><button class="btn sec" onclick="closeModal()">Abbrechen</button></div>`);
 }
 function addIntervalRow(){
@@ -322,6 +324,7 @@ function saveIntervals(id){
   })).filter(i => i.type && (i.km||i.months));
   state.settings.warnKm = Math.max(0, Number(val("w_km"))||0);
   state.settings.warnDays = Math.max(0, Number(val("w_days"))||0);
+  state.settings.warnHu = Math.max(0, Number(val("w_hu"))||0);
   save(); closeModal(); render();
 }
 
@@ -339,6 +342,7 @@ function exportIcs(id){
     out.push("BEGIN:VEVENT",`UID:${i.key}-${ics(d)}@fahrzeuge`,`DTSTAMP:${stamp}`,
       `DTSTART;VALUE=DATE:${ics(d)}`,`DTEND;VALUE=DATE:${ics(next)}`,
       `SUMMARY:${esci(`${i.label}: ${v.name} (${v.plate})`)}`,
+      ...(i.key===v.id+"huDate" ? ["BEGIN:VALARM","ACTION:DISPLAY",`DESCRIPTION:${esci(`${i.label} – ${v.plate}`)}`,"TRIGGER:-P30D","END:VALARM"] : []),
       "BEGIN:VALARM","ACTION:DISPLAY",`DESCRIPTION:${esci(`${i.label} – ${v.plate}`)}`,"TRIGGER:-P14D","END:VALARM",
       "BEGIN:VALARM","ACTION:DISPLAY",`DESCRIPTION:${esci(`${i.label} – ${v.plate}`)}`,"TRIGGER:-P1D","END:VALARM",
       "END:VEVENT");
