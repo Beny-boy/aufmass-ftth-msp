@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projekt-Aufgaben</title>
+<style>
+:root{--bg:#f4f6fa;--card:#fff;--tx:#1b2330;--mut:#667085;--bd:#dde3ec;--ac:#1a56c4;--red:#c62828;--org:#d9730d;--grn:#2e7d32;--blu:#1a56c4}
+@media (prefers-color-scheme:dark){:root{--bg:#10151d;--card:#1a212c;--tx:#e8edf5;--mut:#9aa6b8;--bd:#2c3646;--ac:#6ea0ff;--red:#ff6b6b;--org:#ffa24d;--grn:#6fcf76;--blu:#6ea0ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{padding:16px;background:var(--card);border-bottom:1px solid var(--bd)}
+h1{margin:0 0 4px;font-size:20px}
+main{max-width:980px;margin:0 auto;padding:16px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+button,select,input{font:inherit;color:var(--tx)}
+button{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px 12px;cursor:pointer}
+button.pri{background:var(--ac);color:#fff;border-color:var(--ac)}
+input,select{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:14px}
+.card h2{margin:0 0 8px;font-size:16px}
+.sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px}
+.sum div{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px}
+.sum b{display:block;font-size:24px}
+.row{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--bd)}
+.row:first-of-type{border-top:0}
+.row .t{flex:1;min-width:0;word-break:break-word}
+.row .m{color:var(--mut);font-size:13px}
+.row.done .t b{text-decoration:line-through;color:var(--mut)}
+.tag{display:inline-block;border-radius:999px;padding:1px 8px;font-size:12px;border:1px solid currentColor}
+.overdue{color:var(--red)}.today{color:var(--org)}.soon{color:var(--blu)}.later{color:var(--mut)}
+.x{border:0;background:none;color:var(--mut);padding:4px 8px}
+.hint{color:var(--mut);font-size:13px}
+.warn{background:#fff4e5;color:#7a4500;border:1px solid #ffd59e;border-radius:10px;padding:10px;margin-bottom:12px}
+fieldset{border:1px solid var(--bd);border-radius:10px;margin:0 0 12px}
+label{display:inline-flex;gap:6px;align-items:center;margin-right:12px}
+input[type=checkbox]{width:18px;height:18px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Projekt-Aufgaben</h1>
+  <div class="hint">Excel importieren, offene und anstehende Aufgaben sehen, am Desktop erinnert werden.</div>
+</header>
+<main>
+  <div id="warn" class="warn" hidden></div>
+
+  <div class="card">
+    <div class="bar">
+      <input type="file" id="file" accept=".xlsx,.xls,.csv" hidden>
+      <button class="pri" id="imp">Excel-Tabelle importieren</button>
+      <label><input type="radio" name="mode" value="merge" checked> Zusammenführen</label>
+      <label><input type="radio" name="mode" value="replace"> Alles ersetzen</label>
+      <button id="tpl">Vorlage laden</button>
+      <button id="exp">Als Excel exportieren</button>
+    </div>
+    <div class="hint">Erkannte Spalten: <b>Projekt, Aufgabe, Fällig, Status, Priorität, Verantwortlich</b> (Reihenfolge egal; nur „Aufgabe“ ist Pflicht). Status „erledigt“ = abgehakt, alles andere = offen.</div>
+    <div id="impmsg" class="hint" style="margin-top:6px"></div>
+  </div>
+
+  <div class="card">
+    <h2>Erinnerung am Desktop</h2>
+    <fieldset>
+      <label><input type="checkbox" id="rem"> Erinnerung aktiv</label>
+      <label>Täglich ab <input type="time" id="time" value="08:00"></label>
+      <label>Wiederholen alle
+        <select id="rep"><option value="0">nie</option><option value="1">1 Std.</option><option value="2">2 Std.</option><option value="4">4 Std.</option></select>
+      </label>
+      <button id="test">Test-Benachrichtigung</button>
+    </fieldset>
+    <div class="hint">Benachrichtigt über überfällige Aufgaben, solche von heute und der nächsten 3 Tage. Der Browser-Tab (oder die installierte App) muss dafür geöffnet bleiben; Benachrichtigungen im System müssen erlaubt sein.</div>
+  </div>
+
+  <div class="sum" id="sum"></div>
+
+  <div class="bar">
+    <select id="proj"><option value="">Alle Projekte</option></select>
+    <label><input type="checkbox" id="showdone"> Erledigte zeigen</label>
+  </div>
+
+  <div class="card">
+    <h2>Neue Aufgabe</h2>
+    <div class="bar">
+      <input id="np" placeholder="Projekt" list="plist">
+      <datalist id="plist"></datalist>
+      <input id="nt" placeholder="Aufgabe" style="flex:1;min-width:160px">
+      <input id="nd" type="date">
+      <button class="pri" id="add">Hinzufügen</button>
+    </div>
+  </div>
+
+  <div id="list"></div>
+</main>
+<script src="xlsx.full.min.js"></script>
+<script>
+"use strict";
+const KEY_T = "pa_tasks_v1", KEY_S = "pa_settings_v1";
+const store = {
+  get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } },
+  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
+};
+let tasks = store.get(KEY_T, []);
+let settings = Object.assign({enabled:false, time:"08:00", repeat:0, lastNotify:0}, store.get(KEY_S, {}));
+const $ = id => document.getElementById(id);
+const save = () => { store.set(KEY_T, tasks); render(); };
+const saveS = () => store.set(KEY_S, settings);
+
+/* ---------- Datum ---------- */
+const pad = n => String(n).padStart(2, "0");
+const iso = d => d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate());
+const todayIso = () => iso(new Date());
+const dayNum = s => { const [y,m,d] = s.split("-").map(Number); return Math.round(Date.UTC(y, m-1, d) / 864e5); };
+const fmt = s => { const [y,m,d] = s.split("-"); return d + "." + m + "." + y; };
+function parseDate(v){
+  if (v === null || v === undefined || v === "") return "";
+  if (typeof v === "number" && v > 20000 && v < 80000){   // Excel-Seriennummer
+    const d = new Date(Math.round((v - 25569) * 864e5));
+    return d.getUTCFullYear() + "-" + pad(d.getUTCMonth()+1) + "-" + pad(d.getUTCDate());
+  }
+  if (v instanceof Date) return iso(v);
+  const s = String(v).trim();
+  let m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
+  if (m){ let y = +m[3]; if (y < 100) y += 2000; return y + "-" + pad(+m[2]) + "-" + pad(+m[1]); }
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return m[1] + "-" + pad(+m[2]) + "-" + pad(+m[3]);
+  return "";
+}
+function bucket(t){
+  if (t.done) return "done";
+  if (!t.due) return "nodate";
+  const diff = dayNum(t.due) - dayNum(todayIso());
+  return diff < 0 ? "overdue" : diff === 0 ? "today" : diff <= 7 ? "soon" : "later";
+}
+
+/* ---------- Excel ---------- */
+const ALIAS = {
+  project: ["projekt","project","bauvorhaben","baustelle"],
+  task: ["aufgabe","task","beschreibung","titel","todo","aufgaben"],
+  due: ["fällig","fällig am","faellig","fälligkeit","termin","datum","due","deadline","frist","bis"],
+  status: ["status","erledigt","done"],
+  prio: ["priorität","prioritaet","prio","priority"],
+  owner: ["verantwortlich","zuständig","zustaendig","bearbeiter","owner"]
+};
+const DONE_RE = /^(erledigt|fertig|done|abgeschlossen|closed|complete|completed|x|✓|✔|ja|100%?)$/i;
+function importRows(rows){
+  const out = []; let skipped = 0;
+  if (!rows.length) return {out, skipped, error:"Die Tabelle ist leer."};
+  const hdr = rows[0].map(h => String(h ?? "").trim().toLowerCase());
+  const col = {};
+  for (const k in ALIAS){ const i = hdr.findIndex(h => ALIAS[k].includes(h)); if (i >= 0) col[k] = i; }
+  if (col.task === undefined) return {out, skipped, error:"Keine Spalte „Aufgabe“ gefunden. Erste Zeile muss Spaltenüberschriften enthalten (siehe Vorlage)."};
+  for (const r of rows.slice(1)){
+    const task = String(r[col.task] ?? "").trim();
+    if (!task){ if (r.some(c => String(c ?? "").trim())) skipped++; continue; }
+    const st = col.status !== undefined ? String(r[col.status] ?? "").trim() : "";
+    out.push({
+      project: col.project !== undefined ? String(r[col.project] ?? "").trim() : "",
+      task,
+      due: col.due !== undefined ? parseDate(r[col.due]) : "",
+      done: DONE_RE.test(st),
+      prio: col.prio !== undefined ? String(r[col.prio] ?? "").trim() : "",
+      owner: col.owner !== undefined ? String(r[col.owner] ?? "").trim() : ""
+    });
+  }
+  return {out, skipped};
+}
+const keyOf = t => (t.project + "|" + t.task).toLowerCase();
+function applyImport(list, replace){
+  if (replace) tasks = [];
+  let added = 0, updated = 0;
+  const idx = new Map(tasks.map(t => [keyOf(t), t]));
+  for (const n of list){
+    const ex = idx.get(keyOf(n));
+    if (ex){ Object.assign(ex, n); updated++; }
+    else { const t = Object.assign({id: Date.now().toString(36) + Math.random().toString(36).slice(2,7)}, n); tasks.push(t); idx.set(keyOf(t), t); added++; }
+  }
+  return {added, updated};
+}
+$("imp").onclick = () => $("file").click();
+$("file").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  try {
+    const wb = XLSX.read(await f.arrayBuffer(), {type:"array"});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:""});
+    const res = importRows(rows);
+    if (res.error){ $("impmsg").textContent = res.error; return; }
+    const replace = document.querySelector("input[name=mode]:checked").value === "replace";
+    if (replace && tasks.length && !confirm("Alle bisherigen Aufgaben durch die Tabelle ersetzen?")) return;
+    const r = applyImport(res.out, replace);
+    $("impmsg").textContent = `Import aus „${f.name}“ (Blatt „${wb.SheetNames[0]}“): ${r.added} neu, ${r.updated} aktualisiert` + (res.skipped ? `, ${res.skipped} Zeilen ohne Aufgabe übersprungen` : "") + ".";
+    save();
+  } catch(err){ $("impmsg").textContent = "Datei konnte nicht gelesen werden: " + err.message; }
+};
+function sheetOf(list){
+  const head = ["Projekt","Aufgabe","Fällig","Status","Priorität","Verantwortlich"];
+  const data = [head].concat(list.map(t => [t.project, t.task, t.due ? fmt(t.due) : "", t.done ? "erledigt" : "offen", t.prio, t.owner]));
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws["!cols"] = [{wch:22},{wch:48},{wch:12},{wch:12},{wch:10},{wch:18}];
+  return ws;
+}
+function download(list, name){
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, sheetOf(list), "Aufgaben");
+  XLSX.writeFile(wb, name);
+}
+$("tpl").onclick = () => {
+  const t = todayIso();
+  download([
+    {project:"Beispiel-Projekt", task:"Material bestellen", due:t, done:false, prio:"hoch", owner:""},
+    {project:"Beispiel-Projekt", task:"Abnahme vorbereiten", due:"", done:false, prio:"", owner:""},
+    {project:"Beispiel-Projekt", task:"Angebot versendet", due:"", done:true, prio:"", owner:""}
+  ], "Aufgaben-Vorlage.xlsx");
+};
+$("exp").onclick = () => download(tasks, "Aufgaben-" + todayIso() + ".xlsx");
+
+/* ---------- Anzeige ---------- */
+const LABEL = {overdue:"Überfällig", today:"Heute fällig", soon:"Nächste 7 Tage", later:"Später", nodate:"Ohne Termin", done:"Erledigt"};
+function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+function render(){
+  const projs = [...new Set(tasks.map(t => t.project).filter(Boolean))].sort();
+  const cur = $("proj").value;
+  $("proj").replaceChildren(new Option("Alle Projekte", ""), ...projs.map(p => new Option(p, p)));
+  $("proj").value = projs.includes(cur) ? cur : "";
+  $("plist").replaceChildren(...projs.map(p => new Option(p)));
+  const pf = $("proj").value, showDone = $("showdone").checked;
+  const vis = tasks.filter(t => !pf || t.project === pf);
+  const cnt = {}; for (const t of vis){ const b = bucket(t); cnt[b] = (cnt[b]||0)+1; }
+  const sum = $("sum"); sum.replaceChildren();
+  for (const b of ["overdue","today","soon","later"]){
+    const d = el("div"); d.append(el("b", b, String(cnt[b]||0)), el("span","hint",LABEL[b])); sum.append(d);
+  }
+  const list = $("list"); list.replaceChildren();
+  const order = ["overdue","today","soon","later","nodate"].concat(showDone ? ["done"] : []);
+  let shown = 0;
+  for (const b of order){
+    const items = vis.filter(t => bucket(t) === b).sort((a,c) => (a.due||"9").localeCompare(c.due||"9") || a.project.localeCompare(c.project));
+    if (!items.length) continue;
+    shown += items.length;
+    const card = el("div","card"); card.append(el("h2", b, LABEL[b] + " (" + items.length + ")"));
+    for (const t of items){
+      const row = el("div","row" + (t.done?" done":""));
+      const cb = el("input"); cb.type = "checkbox"; cb.checked = t.done;
+      cb.onchange = () => { t.done = cb.checked; save(); };
+      const body = el("div","t"); body.append(el("b", "", t.task));
+      const meta = [t.project, t.due ? "fällig " + fmt(t.due) : "", t.prio ? "Prio " + t.prio : "", t.owner].filter(Boolean).join(" · ");
+      body.append(el("div","m", meta));
+      const del = el("button","x","✕"); del.title = "Löschen";
+      del.onclick = () => { if (confirm("Aufgabe löschen?")) { tasks = tasks.filter(x => x !== t); save(); } };
+      row.append(cb, body, del); card.append(row);
+    }
+    list.append(card);
+  }
+  if (!shown) list.append(el("div","hint", tasks.length ? "Keine Aufgaben in dieser Ansicht." : "Noch keine Aufgaben. Importieren Sie eine Excel-Tabelle oder legen Sie oben eine Aufgabe an."));
+  const open = (cnt.overdue||0) + (cnt.today||0);
+  document.title = (open ? "(" + open + ") " : "") + "Projekt-Aufgaben";
+}
+$("proj").onchange = render; $("showdone").onchange = render;
+$("add").onclick = () => {
+  const task = $("nt").value.trim(); if (!task) return;
+  tasks.push({id: Date.now().toString(36), project: $("np").value.trim(), task, due: $("nd").value, done:false, prio:"", owner:""});
+  $("nt").value = ""; $("nd").value = ""; save();
+};
+
+/* ---------- Erinnerung ---------- */
+function summary(){
+  const o = [], t = [], s = [];
+  const base = dayNum(todayIso());
+  for (const x of tasks){
+    if (x.done || !x.due) continue;
+    const d = dayNum(x.due) - base;
+    if (d < 0) o.push(x); else if (d === 0) t.push(x); else if (d <= 3) s.push(x);
+  }
+  const n = o.length + t.length + s.length;
+  if (!n) return null;
+  const parts = [];
+  if (o.length) parts.push(o.length + " überfällig");
+  if (t.length) parts.push(t.length + " heute");
+  if (s.length) parts.push(s.length + " in 3 Tagen");
+  const names = o.concat(t, s).slice(0, 3).map(x => (x.project ? x.project + ": " : "") + x.task);
+  return {title: "Aufgaben: " + parts.join(", "), body: names.join("\n") + (n > 3 ? "\n… und " + (n-3) + " weitere" : "")};
+}
+function notify(sm){
+  if (window.desktopNotify){ window.desktopNotify(sm.title, sm.body); return true; } // Desktop-App
+  if (!("Notification" in window) || Notification.permission !== "granted") return false;
+  const n = new Notification(sm.title, {body: sm.body, tag: "projekt-aufgaben"});
+  n.onclick = () => { window.focus(); n.close(); };
+  return true;
+}
+function tick(){
+  if (!settings.enabled) return;
+  const now = new Date(), [h, m] = settings.time.split(":").map(Number);
+  const at = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m);
+  if (now < at) return;
+  const last = settings.lastNotify || 0;
+  const firstToday = last < at.getTime();
+  const repeatDue = settings.repeat > 0 && now.getTime() - last >= settings.repeat * 36e5;
+  if (!firstToday && !repeatDue) return;
+  const sm = summary();
+  if (sm && notify(sm)){ settings.lastNotify = now.getTime(); saveS(); }
+  else if (!sm){ settings.lastNotify = now.getTime(); saveS(); }
+}
+function warn(){
+  const w = $("warn");
+  if (window.desktopNotify){ w.hidden = true; return; }
+  if (!("Notification" in window)){ w.hidden = false; w.textContent = "Dieser Browser unterstützt keine Desktop-Benachrichtigungen."; return; }
+  w.hidden = !(settings.enabled && Notification.permission !== "granted");
+  if (!w.hidden) w.textContent = Notification.permission === "denied"
+    ? "Benachrichtigungen sind für diese Seite blockiert. Bitte in den Browser-Einstellungen der Seite erlauben."
+    : "Bitte Benachrichtigungen erlauben, sonst kann die Erinnerung nicht erscheinen.";
+}
+$("rem").checked = settings.enabled; $("time").value = settings.time; $("rep").value = String(settings.repeat);
+$("rem").onchange = async () => {
+  settings.enabled = $("rem").checked;
+  if (settings.enabled && !window.desktopNotify && "Notification" in window && Notification.permission === "default") await Notification.requestPermission();
+  saveS(); warn(); tick();
+};
+$("time").onchange = () => { settings.time = $("time").value || "08:00"; settings.lastNotify = 0; saveS(); tick(); };
+$("rep").onchange = () => { settings.repeat = +$("rep").value; saveS(); };
+$("test").onclick = async () => {
+  if (!window.desktopNotify && !("Notification" in window)){ warn(); return; }
+  if (!window.desktopNotify && Notification.permission === "default") await Notification.requestPermission();
+  warn();
+  const sm = summary() || {title:"Test: keine fälligen Aufgaben", body:"Die Benachrichtigung funktioniert."};
+  if (!notify(sm)) alert("Benachrichtigungen sind nicht erlaubt.");
+};
+
+render(); warn(); tick();
+setInterval(tick, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden){ render(); tick(); } });
+</script>
+</body>
+</html>
