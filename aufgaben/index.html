@@ -134,22 +134,43 @@ function bucket(t){
 
 /* ---------- Excel ---------- */
 const ALIAS = {
-  project: ["projekt","project","bauvorhaben","baustelle"],
-  task: ["aufgabe","task","beschreibung","titel","todo","aufgaben"],
-  due: ["fällig","fällig am","faellig","fälligkeit","termin","datum","due","deadline","frist","bis"],
-  status: ["status","erledigt","done"],
-  prio: ["priorität","prioritaet","prio","priority"],
-  owner: ["verantwortlich","zuständig","zustaendig","bearbeiter","owner"]
+  task: ["aufgabe","aufgaben","task","tasks","beschreibung","aufgabenbeschreibung","titel","todo","maßnahme","massnahme","tätigkeit","taetigkeit","arbeitspaket","thema","vorgang","bezeichnung"],
+  project: ["projekt","projektname","project","bauvorhaben","baustelle","objekt","vorhaben"],
+  due: ["fällig","faellig","fälligkeit","faelligkeit","fälligkeitsdatum","termin","datum","due","deadline","frist","bis","enddatum","zieldatum","ende","fertigstellung"],
+  status: ["status","erledigt","done","stand","fortschritt"],
+  prio: ["priorität","prioritaet","prio","priority","wichtigkeit"],
+  owner: ["verantwortlich","zuständig","zustaendig","bearbeiter","owner","ansprechpartner","mitarbeiter"]
 };
 const DONE_RE = /^(erledigt|fertig|done|abgeschlossen|closed|complete|completed|x|✓|✔|ja|100%?)$/i;
+const normH = h => String(h ?? "").toLowerCase().replace(/[^a-z0-9äöüß%]+/g, " ").trim();
+function keyOfHeader(h){
+  if (!h) return null;
+  const words = h.split(" ");
+  for (const k in ALIAS) if (ALIAS[k].includes(h) || words.some(w => ALIAS[k].includes(w))) return k;
+  return null;
+}
+function findHeader(rows){
+  let best = null;
+  for (let i = 0; i < Math.min(rows.length, 25); i++){
+    const col = {}; let n = 0;
+    rows[i].forEach((c, j) => { const k = keyOfHeader(normH(c)); if (k && col[k] === undefined){ col[k] = j; n++; } });
+    if (col.task !== undefined && (!best || n > best.n)) best = {row:i, col, n};
+    if (best && best.row === i && n >= 3) break;
+  }
+  return best;
+}
 function importRows(rows){
   const out = []; let skipped = 0;
-  if (!rows.length) return {out, skipped, error:"Die Tabelle ist leer."};
-  const hdr = rows[0].map(h => String(h ?? "").trim().toLowerCase());
-  const col = {};
-  for (const k in ALIAS){ const i = hdr.findIndex(h => ALIAS[k].includes(h)); if (i >= 0) col[k] = i; }
-  if (col.task === undefined) return {out, skipped, error:"Keine Spalte „Aufgabe“ gefunden. Erste Zeile muss Spaltenüberschriften enthalten (siehe Vorlage)."};
-  for (const r of rows.slice(1)){
+  const h = findHeader(rows);
+  if (!h){
+    const first = rows.slice(0, 25).find(r => r.some(c => String(c ?? "").trim()));
+    const names = first ? first.map(c => String(c ?? "").trim()).filter(Boolean).join(" | ") : "";
+    return {out, skipped, error: first
+      ? "Keine Spalte „Aufgabe“ erkannt. Gefundene Überschriften: " + names + ". Benennen Sie die Spalte mit den Aufgaben in „Aufgabe“ um."
+      : "Die Tabelle ist leer."};
+  }
+  const col = h.col;
+  for (const r of rows.slice(h.row + 1)){
     const task = String(r[col.task] ?? "").trim();
     if (!task){ if (r.some(c => String(c ?? "").trim())) skipped++; continue; }
     const st = col.status !== undefined ? String(r[col.status] ?? "").trim() : "";
@@ -162,7 +183,7 @@ function importRows(rows){
       owner: col.owner !== undefined ? String(r[col.owner] ?? "").trim() : ""
     });
   }
-  return {out, skipped};
+  return {out, skipped, sheetHeaderRow: h.row + 1};
 }
 const keyOf = t => (t.project + "|" + t.task).toLowerCase();
 function applyImport(list, replace){
@@ -182,14 +203,18 @@ $("file").onchange = async e => {
   if (!f) return;
   try {
     const wb = XLSX.read(await f.arrayBuffer(), {type:"array"});
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, defval:""});
-    const res = importRows(rows);
+    let res = null, sheet = "";
+    for (const name of wb.SheetNames){
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, raw:true, defval:""});
+      const r = importRows(rows);
+      if (!res) { res = r; sheet = name; }
+      if (!r.error){ res = r; sheet = name; break; }
+    }
     if (res.error){ $("impmsg").textContent = res.error; return; }
     const replace = document.querySelector("input[name=mode]:checked").value === "replace";
     if (replace && tasks.length && !confirm("Alle bisherigen Aufgaben durch die Tabelle ersetzen?")) return;
     const r = applyImport(res.out, replace);
-    $("impmsg").textContent = `Import aus „${f.name}“ (Blatt „${wb.SheetNames[0]}“): ${r.added} neu, ${r.updated} aktualisiert` + (res.skipped ? `, ${res.skipped} Zeilen ohne Aufgabe übersprungen` : "") + ".";
+    $("impmsg").textContent = `Import aus „${f.name}“ (Blatt „${sheet}“, Überschriften in Zeile ${res.sheetHeaderRow}): ${r.added} neu, ${r.updated} aktualisiert` + (res.skipped ? `, ${res.skipped} Zeilen ohne Aufgabe übersprungen` : "") + ".";
     save();
   } catch(err){ $("impmsg").textContent = "Datei konnte nicht gelesen werden: " + err.message; }
 };
