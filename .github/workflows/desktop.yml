@@ -1,0 +1,19 @@
+name: Desktop-App (Windows)
+on:
+  push:
+    paths: ['aufgaben/**', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults: { run: { working-directory: aufgaben } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm install
+      - run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: projekt-aufgaben-windows-installer
+          path: aufgaben/dist/*.exe
