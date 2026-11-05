@@ -19,7 +19,7 @@ button.pri{background:var(--ac);color:#fff;border-color:var(--ac)}
 input,select{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px}
 .card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:14px}
 .card h2{margin:0 0 8px;font-size:16px}
-.sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:14px}
+.sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:14px}
 .sum div{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:10px}
 .sum b{display:block;font-size:24px}
 .row{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--bd)}
@@ -28,7 +28,7 @@ input,select{background:var(--card);border:1px solid var(--bd);border-radius:8px
 .row .m{color:var(--mut);font-size:13px}
 .row.done .t b{text-decoration:line-through;color:var(--mut)}
 .tag{display:inline-block;border-radius:999px;padding:1px 8px;font-size:12px;border:1px solid currentColor}
-.overdue{color:var(--red)}.today{color:var(--org)}.soon{color:var(--blu)}.later{color:var(--mut)}
+.overdue,.urgent{color:var(--red)}.today{color:var(--org)}.soon{color:var(--blu)}.later{color:var(--mut)}
 .x{border:0;background:none;color:var(--mut);padding:4px 8px}
 .hint{color:var(--mut);font-size:13px}
 .warn{background:#fff4e5;color:#7a4500;border:1px solid #ffd59e;border-radius:10px;padding:10px;margin-bottom:12px}
@@ -125,9 +125,26 @@ function parseDate(v){
   if (m) return m[1] + "-" + pad(+m[2]) + "-" + pad(+m[3]);
   return "";
 }
+/* Freitext-Termine wie "Mo 09.11.", "vor 16.11.", "09.–13.11.", "15./23.09.", "12./18.03.2026" -> letztes genanntes Datum */
+function parseTermin(v){
+  const d = parseDate(v);
+  if (d) return d;
+  if (typeof v !== "string") return "";
+  const s = v.trim();
+  const year = new Date().getFullYear();
+  let last = "";
+  const re = /(\d{1,2})\.(?:\s*[–\-\/]\s*(\d{1,2})\.)?\s*(\d{1,2})\.(\d{4})?/g;
+  let m;
+  while ((m = re.exec(s))){
+    const day = +(m[2] || m[1]), mon = +m[3], y = m[4] ? +m[4] : year;
+    if (day >= 1 && day <= 31 && mon >= 1 && mon <= 12) last = y + "-" + pad(mon) + "-" + pad(day);
+  }
+  return last;
+}
+const isUrgent = t => /dringend|sofort|jetzt/i.test((t.prio || "") + " " + (t.termin || ""));
 function bucket(t){
   if (t.done) return "done";
-  if (!t.due) return "nodate";
+  if (!t.due) return isUrgent(t) ? "urgent" : "nodate";
   const diff = dayNum(t.due) - dayNum(todayIso());
   return diff < 0 ? "overdue" : diff === 0 ? "today" : diff <= 7 ? "soon" : "later";
 }
@@ -135,11 +152,12 @@ function bucket(t){
 /* ---------- Excel ---------- */
 const ALIAS = {
   task: ["aufgabe","aufgaben","task","tasks","beschreibung","aufgabenbeschreibung","titel","todo","maßnahme","massnahme","tätigkeit","taetigkeit","arbeitspaket","thema","vorgang","bezeichnung"],
-  project: ["projekt","projektname","project","bauvorhaben","baustelle","objekt","vorhaben"],
+  project: ["projekt","projektname","project","bauvorhaben","baustelle","objekt","vorhaben","bereich"],
   due: ["fällig","faellig","fälligkeit","faelligkeit","fälligkeitsdatum","termin","datum","due","deadline","frist","bis","enddatum","zieldatum","ende","fertigstellung"],
   status: ["status","erledigt","done","stand","fortschritt"],
   prio: ["priorität","prioritaet","prio","priority","wichtigkeit"],
-  owner: ["verantwortlich","zuständig","zustaendig","bearbeiter","owner","ansprechpartner","mitarbeiter"]
+  owner: ["verantwortlich","zuständig","zustaendig","bearbeiter","owner","ansprechpartner","mitarbeiter","wer"],
+  note: ["bemerkung","notiz","quelle","kommentar"]
 };
 const DONE_RE = /^(erledigt|fertig|done|abgeschlossen|closed|complete|completed|x|✓|✔|ja|100%?)$/i;
 const normH = h => String(h ?? "").toLowerCase().replace(/[^a-z0-9äöüß%]+/g, " ").trim();
@@ -174,12 +192,17 @@ function importRows(rows){
     const task = String(r[col.task] ?? "").trim();
     if (!task){ if (r.some(c => String(c ?? "").trim())) skipped++; continue; }
     const st = col.status !== undefined ? String(r[col.status] ?? "").trim() : "";
+    const rawDue = col.due !== undefined ? r[col.due] : "";
+    const terminText = typeof rawDue === "string" && rawDue.trim() && !/^[–\-—]$/.test(rawDue.trim()) ? rawDue.trim() : "";
+    const prioCol = col.prio !== undefined ? String(r[col.prio] ?? "").trim() : "";
     out.push({
       project: col.project !== undefined ? String(r[col.project] ?? "").trim() : "",
       task,
-      due: col.due !== undefined ? parseDate(r[col.due]) : "",
+      due: parseTermin(rawDue),
+      termin: terminText,
       done: DONE_RE.test(st),
-      prio: col.prio !== undefined ? String(r[col.prio] ?? "").trim() : "",
+      prio: prioCol || (/dringend|kritisch|hoch/i.test(st) ? st : ""),
+      note: col.note !== undefined ? String(r[col.note] ?? "").trim() : "",
       owner: col.owner !== undefined ? String(r[col.owner] ?? "").trim() : ""
     });
   }
@@ -220,7 +243,7 @@ $("file").onchange = async e => {
 };
 function sheetOf(list){
   const head = ["Projekt","Aufgabe","Fällig","Status","Priorität","Verantwortlich"];
-  const data = [head].concat(list.map(t => [t.project, t.task, t.due ? fmt(t.due) : "", t.done ? "erledigt" : "offen", t.prio, t.owner]));
+  const data = [head].concat(list.map(t => [t.project, t.task, t.termin || (t.due ? fmt(t.due) : ""), t.done ? "erledigt" : "offen", t.prio, t.owner]));
   const ws = XLSX.utils.aoa_to_sheet(data);
   ws["!cols"] = [{wch:22},{wch:48},{wch:12},{wch:12},{wch:10},{wch:18}];
   return ws;
@@ -240,7 +263,7 @@ $("tpl").onclick = () => {
 $("exp").onclick = () => download(tasks, "Aufgaben-" + todayIso() + ".xlsx");
 
 /* ---------- Anzeige ---------- */
-const LABEL = {overdue:"Überfällig", today:"Heute fällig", soon:"Nächste 7 Tage", later:"Später", nodate:"Ohne Termin", done:"Erledigt"};
+const LABEL = {overdue:"Überfällig", urgent:"Dringend, ohne festen Termin", today:"Heute fällig", soon:"Nächste 7 Tage", later:"Später", nodate:"Ohne Termin", done:"Erledigt"};
 function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 function render(){
   const projs = [...new Set(tasks.map(t => t.project).filter(Boolean))].sort();
@@ -252,11 +275,11 @@ function render(){
   const vis = tasks.filter(t => !pf || t.project === pf);
   const cnt = {}; for (const t of vis){ const b = bucket(t); cnt[b] = (cnt[b]||0)+1; }
   const sum = $("sum"); sum.replaceChildren();
-  for (const b of ["overdue","today","soon","later"]){
+  for (const b of ["overdue","urgent","today","soon","later"]){
     const d = el("div"); d.append(el("b", b, String(cnt[b]||0)), el("span","hint",LABEL[b])); sum.append(d);
   }
   const list = $("list"); list.replaceChildren();
-  const order = ["overdue","today","soon","later","nodate"].concat(showDone ? ["done"] : []);
+  const order = ["overdue","urgent","today","soon","later","nodate"].concat(showDone ? ["done"] : []);
   let shown = 0;
   for (const b of order){
     const items = vis.filter(t => bucket(t) === b).sort((a,c) => (a.due||"9").localeCompare(c.due||"9") || a.project.localeCompare(c.project));
@@ -268,8 +291,10 @@ function render(){
       const cb = el("input"); cb.type = "checkbox"; cb.checked = t.done;
       cb.onchange = () => { t.done = cb.checked; save(); };
       const body = el("div","t"); body.append(el("b", "", t.task));
-      const meta = [t.project, t.due ? "fällig " + fmt(t.due) : "", t.prio ? "Prio " + t.prio : "", t.owner].filter(Boolean).join(" · ");
+      const termin = t.termin ? "Termin: " + t.termin + (t.due ? " (" + fmt(t.due) + ")" : "") : (t.due ? "fällig " + fmt(t.due) : "");
+      const meta = [t.project, termin, t.prio ? "Prio " + t.prio : "", t.owner].filter(Boolean).join(" · ");
       body.append(el("div","m", meta));
+      if (t.note) body.append(el("div","m", t.note));
       const del = el("button","x","✕"); del.title = "Löschen";
       del.onclick = () => { if (confirm("Aufgabe löschen?")) { tasks = tasks.filter(x => x !== t); save(); } };
       row.append(cb, body, del); card.append(row);
@@ -277,7 +302,7 @@ function render(){
     list.append(card);
   }
   if (!shown) list.append(el("div","hint", tasks.length ? "Keine Aufgaben in dieser Ansicht." : "Noch keine Aufgaben. Importieren Sie eine Excel-Tabelle oder legen Sie oben eine Aufgabe an."));
-  const open = (cnt.overdue||0) + (cnt.today||0);
+  const open = (cnt.overdue||0) + (cnt.urgent||0) + (cnt.today||0);
   document.title = (open ? "(" + open + ") " : "") + "Projekt-Aufgaben";
 }
 $("proj").onchange = render; $("showdone").onchange = render;
@@ -289,20 +314,22 @@ $("add").onclick = () => {
 
 /* ---------- Erinnerung ---------- */
 function summary(){
-  const o = [], t = [], s = [];
+  const o = [], t = [], s = [], u = [];
   const base = dayNum(todayIso());
   for (const x of tasks){
-    if (x.done || !x.due) continue;
+    if (x.done) continue;
+    if (!x.due){ if (isUrgent(x)) u.push(x); continue; }
     const d = dayNum(x.due) - base;
     if (d < 0) o.push(x); else if (d === 0) t.push(x); else if (d <= 3) s.push(x);
   }
-  const n = o.length + t.length + s.length;
+  const n = o.length + u.length + t.length + s.length;
   if (!n) return null;
   const parts = [];
   if (o.length) parts.push(o.length + " überfällig");
+  if (u.length) parts.push(u.length + " dringend");
   if (t.length) parts.push(t.length + " heute");
   if (s.length) parts.push(s.length + " in 3 Tagen");
-  const names = o.concat(t, s).slice(0, 3).map(x => (x.project ? x.project + ": " : "") + x.task);
+  const names = o.concat(u, t, s).slice(0, 3).map(x => (x.project ? x.project + ": " : "") + x.task);
   return {title: "Aufgaben: " + parts.join(", "), body: names.join("\n") + (n > 3 ? "\n… und " + (n-3) + " weitere" : "")};
 }
 function notify(sm){
